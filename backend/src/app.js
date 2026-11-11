@@ -12,6 +12,7 @@
 
 const express = require('express');
 const multer = require('multer');
+const config = require('./config');
 const documentRoutes = require('./routes/documentRoutes');
 
 const publicErrorCodes = new Set([
@@ -22,6 +23,8 @@ const publicErrorCodes = new Set([
   'INVALID_MULTIPART',
   'INTERNAL_ERROR',
   'STORAGE_ERROR',
+  'STORAGE_QUOTA_EXCEEDED',
+  'TOO_MANY_UPLOADS',
 ]);
 
 const app = express();
@@ -44,7 +47,9 @@ app.use((error, req, res, next) => {
 
   let status = Number.isInteger(error.status) ? error.status : 500;
   let code = publicErrorCodes.has(error.code) ? error.code : 'INTERNAL_ERROR';
-  let message = status >= 500 ? 'Ocorreu um erro interno.' : error.message;
+  let message = status >= 500 && code !== 'STORAGE_QUOTA_EXCEEDED'
+    ? 'Ocorreu um erro interno.'
+    : error.message;
 
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
@@ -59,6 +64,9 @@ app.use((error, req, res, next) => {
   } else if (error.code === 'STORAGE_ERROR') {
     status = 500;
     message = error.message;
+  } else if (error.code === 'STORAGE_QUOTA_EXCEEDED') {
+    status = 507;
+    message = error.message;
   } else if (status === 400 && !publicErrorCodes.has(error.code)) {
     code = 'INVALID_MULTIPART';
     message = 'A requisição multipart é inválida.';
@@ -71,8 +79,8 @@ app.use((error, req, res, next) => {
 });
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`DMS backend ouvindo na porta ${PORT}`);
+  app.listen(PORT, config.host, () => {
+    console.log(`DMS backend ouvindo em ${config.host}:${PORT}`);
   });
 }
 

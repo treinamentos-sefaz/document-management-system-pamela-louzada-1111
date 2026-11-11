@@ -19,13 +19,15 @@ function toPublicDocument(document) {
   };
 }
 
-async function upload(file) {
+async function upload(file, reservation) {
   if (!file) {
+    reservation?.release();
     throw createError(400, 'FILE_REQUIRED', 'Envie um arquivo no campo file.');
   }
 
   if (file.size === 0) {
     await documentRepository.removeStoredFile(file.filename).catch(() => {});
+    reservation?.release();
     throw createError(400, 'EMPTY_FILE', 'O arquivo enviado está vazio.');
   }
 
@@ -40,9 +42,14 @@ async function upload(file) {
   };
 
   try {
-    documentRepository.save(document);
+    if (!reservation) {
+      throw new Error('Reserva de upload ausente.');
+    }
+
+    reservation.commit(document);
   } catch (error) {
     await documentRepository.removeStoredFile(file.filename).catch(() => {});
+    reservation?.release();
     throw createError(500, 'STORAGE_ERROR', 'Não foi possível registrar o documento.');
   }
 
@@ -67,25 +74,20 @@ async function getDownload(id) {
   }
 
   try {
-    const exists = await documentRepository.fileExists(document.storageKey);
-
-    if (!exists) {
-      documentRepository.deleteMetadata(id);
-      throw createError(404, 'DOCUMENT_NOT_FOUND', 'Documento não encontrado.');
-    }
+    return {
+      stream: await documentRepository.createReadStream(document.storageKey),
+      originalName: document.originalName,
+      mimeType: document.mimeType,
+    };
   } catch (error) {
-    if (error.status === 404) {
-      throw error;
+    if (['ENOENT', 'ELOOP', 'EISDIR'].includes(error.code)) {
+      documentRepository.deleteMetadata(id);
+      documentRepository.forgetStoredFile(document.storageKey);
+      throw createError(404, 'DOCUMENT_NOT_FOUND', 'Documento não encontrado.');
     }
 
     throw createError(500, 'STORAGE_ERROR', 'Não foi possível acessar o documento.');
   }
-
-  return {
-    stream: documentRepository.createReadStream(document.storageKey),
-    originalName: document.originalName,
-    mimeType: document.mimeType,
-  };
 }
 
 module.exports = {

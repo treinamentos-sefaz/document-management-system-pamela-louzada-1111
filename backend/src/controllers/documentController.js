@@ -1,7 +1,7 @@
 const documentService = require('../services/documentService');
 
 async function upload(req, res) {
-  const document = await documentService.upload(req.file);
+  const document = await documentService.upload(req.file, req.uploadReservation);
   res.status(201).json(document);
 }
 
@@ -18,6 +18,7 @@ async function download(req, res, next) {
 
   res.attachment(safeName);
   res.type(safeMimeType);
+  res.set('X-Content-Type-Options', 'nosniff');
   document.stream.on('error', (error) => {
     if (res.headersSent) {
       res.destroy(error);

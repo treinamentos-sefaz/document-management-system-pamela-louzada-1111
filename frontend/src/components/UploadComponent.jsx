@@ -79,6 +79,7 @@ export default function UploadComponent({ onUploaded }) {
             ref={inputRef}
             className="visually-hidden"
             type="file"
+            aria-label="Selecionar arquivo para envio"
             onChange={(event) => selectFile(event.target.files?.[0])}
             disabled={isUploading}
           />

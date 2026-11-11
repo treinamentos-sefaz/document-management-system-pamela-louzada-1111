@@ -37,7 +37,7 @@ input {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible + span {
+label:focus-within {
   outline: 3px solid rgba(25, 107, 81, 0.32);
   outline-offset: 3px;
 }

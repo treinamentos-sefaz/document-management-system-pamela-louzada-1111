@@ -32,7 +32,11 @@ Oferecer uma aplicação web simples para enviar, listar e baixar documentos arm
 - `owner` é um identificador operacional fixo para a instância, não uma identidade autenticada. Seu valor vem da configuração `DMS_DEFAULT_OWNER`, com padrão `local-user`.
 - A aplicação inteira compartilha a mesma coleção; a listagem não filtra por `owner`.
 - O limite padrão de upload é 10 MiB por arquivo e pode ser alterado por `DMS_MAX_FILE_SIZE_BYTES`.
+- O limite padrão para armazenamento local é 1 GiB e o limite de documentos por processo é 1000; ambos podem ser configurados por `DMS_MAX_STORAGE_BYTES` e `DMS_MAX_DOCUMENTS`.
+- O backend aceita até 8 uploads simultâneos por processo, configurável por `DMS_MAX_CONCURRENT_UPLOADS`; novas solicitações concorrentes recebem `429`.
+- O backend escuta em `127.0.0.1` por padrão. Para acesso remoto, `DMS_HOST` pode ser configurado explicitamente, mas a API do MVP não tem autenticação e deve ser protegida por uma rede confiável ou camada externa de controle de acesso.
 - Arquivos podem continuar no disco após o encerramento do processo, mas os metadados em memória são perdidos. Reiniciar o processo não recupera esses metadados.
+- A quota contabiliza arquivos regulares já existentes no diretório na inicialização do repositório, inclusive arquivos órfãos de reinicializações; symlinks não são seguidos nem contabilizados como documentos.
 - As respostas e mensagens descritas abaixo são o contrato esperado, não funcionalidades já presentes no seed atual.
 
 ## 3. Requisitos funcionais
@@ -55,7 +59,7 @@ Oferecer uma aplicação web simples para enviar, listar e baixar documentos arm
 | RNF-01 | O conteúdo dos arquivos deve ser gravado exclusivamente no filesystem local da aplicação, em `backend/storage`, usando Multer com `diskStorage`. Não usar armazenamento externo. |
 | RNF-02 | Metadados devem permanecer em memória durante a vida do processo. O MVP não promete durabilidade nem recuperação após reinício. |
 | RNF-03 | O backend deve manter a separação `routes -> controllers -> services -> repositories`, sem fazer camadas internas dependerem do Express ou de detalhes HTTP. |
-| RNF-04 | Configurações de porta, limite do arquivo e identificador padrão de dono devem vir de variáveis de ambiente, com defaults documentados. |
+| RNF-04 | Configurações de porta, bind, limites de arquivo/armazenamento/documentos/concorrência e identificador padrão de dono devem vir de variáveis de ambiente, com defaults documentados. |
 | RNF-05 | O nome de arquivo interno deve ser gerado pela aplicação. O nome original não pode ser concatenado a um caminho de filesystem. |
 | RNF-06 | A API deve usar respostas JSON em UTF-8 para metadados e erros; o download deve transferir o conteúdo binário como anexo. |
 | RNF-07 | O frontend deve chamar a API com `fetch` pelo prefixo `/api`; em desenvolvimento, o proxy Vite encaminha para o backend e remove esse prefixo. |
@@ -66,7 +70,11 @@ Oferecer uma aplicação web simples para enviar, listar e baixar documentos arm
 | Variável | Default | Uso |
 | --- | --- | --- |
 | `PORT` | `3000` | Porta HTTP do backend. |
+| `DMS_HOST` | `127.0.0.1` | Interface de rede do backend. Um bind externo exige proteção de rede porque o MVP não tem autenticação. |
 | `DMS_MAX_FILE_SIZE_BYTES` | `10485760` | Tamanho máximo de um arquivo, em bytes (10 MiB). Deve ser um inteiro positivo. |
+| `DMS_MAX_STORAGE_BYTES` | `1073741824` | Quota local para arquivos contabilizados, em bytes (1 GiB). Deve ser maior ou igual ao limite por arquivo. |
+| `DMS_MAX_DOCUMENTS` | `1000` | Número máximo de documentos com metadados no processo. Deve ser um inteiro positivo. |
+| `DMS_MAX_CONCURRENT_UPLOADS` | `8` | Número máximo de uploads em processamento simultaneamente. Deve ser um inteiro positivo. |
 | `DMS_DEFAULT_OWNER` | `local-user` | Valor atribuído ao campo `owner` nos uploads. Não é credencial nem mecanismo de autorização. |
 
 Configuração ausente usa o default. Valor inválido para o limite deve impedir a inicialização ou ser reportado claramente, sem substituir silenciosamente o limite por um valor sem limite.
@@ -125,8 +133,11 @@ Todas as respostas de erro da API devem usar JSON no formato:
 - **Content-Type:** `multipart/form-data`.
 - **Campo obrigatório:** `file`, contendo um arquivo por requisição.
 - **Limite:** `DMS_MAX_FILE_SIZE_BYTES`, padrão 10 MiB.
+- A requisição aceita somente a parte `file`; campos multipart adicionais são rejeitados.
 - **Sucesso:** `201 Created`, corpo JSON com o objeto público do documento.
 - **Erros:** `400 Bad Request` para campo ausente, arquivo vazio ou multipart inválido; `413 Payload Too Large` para arquivo acima do limite; `500 Internal Server Error` para falha inesperada de escrita ou persistência.
+- **Quota:** `507 Insufficient Storage` quando a quota local ou o limite de documentos foi atingido.
+- **Concorrência:** `429 Too Many Requests` quando o limite de uploads em processamento foi atingido.
 - O cliente não deve definir manualmente o header `Content-Type` ao usar `FormData`; o navegador precisa incluir o boundary multipart.
 
 Exemplo de sucesso:
@@ -181,6 +192,8 @@ Exemplo:
 | `400` | `INVALID_MULTIPART` | Requisição multipart inválida ou malformada. |
 | `404` | `DOCUMENT_NOT_FOUND` | ID inexistente ou arquivo correspondente indisponível. |
 | `413` | `FILE_TOO_LARGE` | Arquivo excede o limite configurado. |
+| `429` | `TOO_MANY_UPLOADS` | Número máximo de uploads simultâneos atingido. |
+| `507` | `STORAGE_QUOTA_EXCEEDED` | Quota de bytes ou quantidade máxima de documentos atingida. |
 | `500` | `STORAGE_ERROR` | Falha inesperada ao gravar ou ler o arquivo. |
 | `500` | `INTERNAL_ERROR` | Outra falha inesperada. |
 
