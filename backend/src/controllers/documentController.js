@@ -9,6 +9,7 @@ function list(req, res) {
   res.status(200).json({ documents: documentService.list() });
 }
 
+// download
 async function download(req, res, next) {
   const document = await documentService.getDownload(req.params.id);
   const safeName = document.originalName.replace(/[\\/\r\n\0]/g, '_') || 'document';
